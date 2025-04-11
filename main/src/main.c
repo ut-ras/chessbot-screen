@@ -19,7 +19,8 @@
 #include "lvgl/examples/lv_examples.h"
 #include "lvgl/demos/lv_demos.h"
 #include "glob.h"
-
+static lv_display_t * hal_init(int32_t w, int32_t h)
+;
 // Custom delay function to replace lv_os_delay_ms
 void custom_delay_ms(uint32_t ms) {
     usleep(ms * 1000);
@@ -42,6 +43,9 @@ int custom_thread_create(pthread_t *thread, void *(*thread_func)(void*), size_t 
     // For proper priority handling, you would need to use pthread_setschedparam
 
     int ret = pthread_create(thread, &attr, thread_func, param);
+    if (ret != 0) {
+        printf("Error creating thread: %d\n", ret);
+    }
     pthread_attr_destroy(&attr);
     return ret;
 }
@@ -54,9 +58,6 @@ int custom_thread_create(pthread_t *thread, void *(*thread_func)(void*), size_t 
  **********************/
 
 /**********************
- *  STATIC PROTOTYPES
- **********************/
-static lv_display_t * hal_init(int32_t w, int32_t h);
 
 /**********************
  *  STATIC VARIABLES
@@ -197,7 +198,7 @@ bool pieces[64];
 
  static lv_color_t reset_cb(lv_event_t * e)
  {
-     printf("hmm");
+    //  printf("hmm");
      lv_event_code_t code = lv_event_get_code(e);
      lv_obj_t * btn = lv_event_get_target(e);
      if(code == LV_EVENT_CLICKED) {
@@ -262,14 +263,29 @@ static void test() {
     for (i = 0; i < 64; i++) {
       printf("i: %d\n", i);
       pieces[i] = true;
-      lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
+      printf("iiii: %d\n", i);
+
+      // Check if piece_circles[i] is valid before setting opacity
+      if (piece_circles[i] != NULL) {
+        lv_obj_set_style_bg_opa(piece_circles[i], LV_OPA_100, 0);
+      } else {
+        printf("piece ciecle is null booooo\n");
+      }
+      printf("i: %d\n", i);
+
       if (i > 2) {
         pieces[i - 3] = false;
+        printf("b: %d\n", i);
+
         lv_obj_set_style_opa(piece_circles[i - 3], LV_OPA_0, 0);
+        printf("c: %d\n", i);
+
       }
     }
+    printf("d: %d\n", i);
 
     lv_tick_inc(100); // Example if you're simulating some delay
+    printf("e: %d\n", i);
 
     // Unlock mutex after modifying UI
     pthread_mutex_unlock(&lvgl_mutex);
@@ -295,27 +311,35 @@ int main(int argc, char **argv)
   /*Initialize LVGL*/
   lv_init();
 
+  // Initialize mutex for LVGL operations
+  pthread_mutex_init(&lvgl_mutex, NULL);
+
   /*Initialize the HAL (display, input devices, tick) for LVGL*/
   hal_init(480,320);
+ // lv_demo_widgets();
+ pthread_mutex_lock(&lvgl_mutex);
+ lv_grid_1();
+ pthread_mutex_unlock(&lvgl_mutex);
+  // Create test thread
+  pthread_t test_thread_handle;
+  custom_thread_create(&test_thread_handle, test_thread, 4096, 1, NULL);
 
-  // #if LV_USE_OS == LV_OS_NONE
 
-  // lv_demo_widgets();
-lv_grid_1();
+
   while(1) {
+    pthread_mutex_lock(&lvgl_mutex);
     lv_buttons();
     /* Periodically call the lv_task handler.
      * It could be done in a timer interrupt or an OS task too.*/
     lv_timer_handler();
+    lv_tick_inc(5); // Update LVGL tick count
+    pthread_mutex_unlock(&lvgl_mutex);
+
     usleep(5 * 1000);
   }
 
-  // #elif LV_USE_OS == LV_OS_FREERTOS
-
-  /* Run FreeRTOS and create lvgl task */
-  // freertos_main();
-
-  // #endif
+  // This will never be reached
+  pthread_mutex_destroy(&lvgl_mutex);
 
   return 0;
 }
