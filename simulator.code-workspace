@@ -26,7 +26,19 @@
 		"cmake.configureOnOpen": true,
 		"files.associations": {
 			"glob.h": "c",
-			"lvgl.h": "c"
+			"lvgl.h": "c",
+			"bitset": "c",
+			"lv_demos.h": "c",
+			"lv_os.h": "c",
+			"lv_conf_internal.h": "c",
+			"lv_pthread.h": "c",
+			"lv_examples.h": "c"
+		},
+		"github.copilot.enable": {
+			"*": false,
+			"plaintext": false,
+			"markdown": false,
+			"scminput": false
 		},
 	},
 	// tasks.json section
