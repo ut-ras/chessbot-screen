@@ -257,17 +257,18 @@ static void test() {
   while (1) {
     uint8_t i;
 
-    // Lock mutex before modifying UI
-    pthread_mutex_lock(&lvgl_mutex);
 
     for (i = 0; i < 64; i++) {
+          // Lock mutex before modifying UI
+    pthread_mutex_lock(&lvgl_mutex);
+
       printf("i: %d\n", i);
       pieces[i] = true;
       printf("iiii: %d\n", i);
 
       // Check if piece_circles[i] is valid before setting opacity
       if (piece_circles[i] != NULL) {
-        lv_obj_set_style_bg_opa(piece_circles[i], LV_OPA_100, 0);
+        lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
       } else {
         printf("piece ciecle is null booooo\n");
       }
@@ -281,8 +282,7 @@ static void test() {
         printf("c: %d\n", i);
 
       }
-    }
-    printf("d: %d\n", i);
+      printf("d: %d\n", i);
 
     lv_tick_inc(100); // Example if you're simulating some delay
     printf("e: %d\n", i);
@@ -291,6 +291,8 @@ static void test() {
     pthread_mutex_unlock(&lvgl_mutex);
 
     custom_delay_ms(100); // portable LVGL delay
+    }
+
   }
 }
 
