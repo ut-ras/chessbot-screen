@@ -99,6 +99,7 @@ lv_obj_t * piece_circles [64];
 // lv_obj_t **reset_address;
 bool play = false;
 bool pieces[64];
+bool test_toggle = true;
 
  void lv_grid_1(void)
  {
@@ -160,6 +161,19 @@ bool pieces[64];
                               LV_GRID_ALIGN_STRETCH, row, 1);
         lv_obj_set_style_radius(piece, 20, 0);
         lv_obj_set_style_opa(piece, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(piece, 0, 1);
+        if (i < 16) {
+          lv_obj_set_style_bg_color(piece, lv_color_black(), 0);
+          lv_obj_set_style_border_color(piece, lv_color_white(), 0);
+        }
+        else if (i > 47) {
+          lv_obj_set_style_bg_color(piece, lv_color_white(), 0);
+          lv_obj_set_style_border_color(piece, lv_color_black(), 0);
+        }
+        else {
+          lv_obj_set_style_bg_color(piece, lv_color_hex(0xAAAAAA), 0);
+          lv_obj_set_style_border_color(piece, lv_color_hex(0x666666), 0);
+        }
         // lv_style_t style_circle;
         // lv_style_init(&style_circle);
 
@@ -256,34 +270,49 @@ void* lvgl_loop_thread(void *param) {
 static void test() {
   while (1) {
     uint8_t i;
-
+    test_toggle = !test_toggle;
 
     for (i = 0; i < 64; i++) {
           // Lock mutex before modifying UI
     pthread_mutex_lock(&lvgl_mutex);
 
       printf("i: %d\n", i);
-      pieces[i] = true;
-      printf("iiii: %d\n", i);
+      if (!test_toggle) {
+        pieces[i] = true;
+        printf("iiii: %d\n", i);
 
-      // Check if piece_circles[i] is valid before setting opacity
-      if (piece_circles[i] != NULL) {
-        lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
-      } else {
-        printf("piece ciecle is null booooo\n");
+        // Check if piece_circles[i] is valid before setting opacity
+        if (piece_circles[i] != NULL && (i < 16 || i > 47)) {
+          lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
+        } else {
+          printf("piece ciecle is null booooo\n");
+          i += 31;
+        }
+        printf("i: %d\n", i);
+
+        // if (i > 2) {
+        //   pieces[i - 3] = false;
+        //   printf("b: %d\n", i);
+
+        //   lv_obj_set_style_opa(piece_circles[i - 3], LV_OPA_0, 0);
+        //   printf("c: %d\n", i);
+
+        // }
       }
-      printf("i: %d\n", i);
+      else {
+        pieces[i] = false;
+        printf("iiii: %d\n", i);
 
-      if (i > 2) {
-        pieces[i - 3] = false;
-        printf("b: %d\n", i);
-
-        lv_obj_set_style_opa(piece_circles[i - 3], LV_OPA_0, 0);
-        printf("c: %d\n", i);
-
-      }
+        // Check if piece_circles[i] is valid before setting opacity
+        if (piece_circles[i] != NULL && (i < 16 || i > 47)) {
+          lv_obj_set_style_opa(piece_circles[i], LV_OPA_0, 0);
+        } else {
+          printf("piece ciecle is null booooo\n");
+          i += 31;
+        }
+        printf("i: %d\n", i);
       printf("d: %d\n", i);
-
+      }
     lv_tick_inc(100); // Example if you're simulating some delay
     printf("e: %d\n", i);
 
