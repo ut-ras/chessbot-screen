@@ -605,9 +605,6 @@ int message_arrived(void *context, char *topicName, int topicLen, MQTTAsync_mess
             printf("aaa\n");
             lv_obj_set_style_border_color(piece_circles[new_pos_int], border_color, 0);
             printf("aaaa\n");
-            pieces[original_pos_int] = false;
-            pieces[new_pos_int] = true;
-            printf("aaaaa\n");
           }
 
       }
