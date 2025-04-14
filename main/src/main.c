@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include "SPI_LCD/spi_lcd.h"
 #define DEBUG 1
 
 #define ADDRESS     "tcp://localhost:1883"
@@ -705,35 +706,38 @@ int main(int argc, char **argv)
  *   STATIC FUNCTIONS
  **********************/
 
-/**
- * Initialize the Hardware Abstraction Layer (HAL) for the LVGL graphics
- * library
- */
+// Replace the old flush callback with the new interface
+static void flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map)
+{
+    int tileWidth = lv_area_get_width(area);
+    // Send the draw buffer to the SPI display.
+    // Assumes lv_color_t is 16-bit and pitch equals tileWidth * sizeof(lv_color_t)
+    spilcdDrawTile(area->x1, area->y1, tileWidth, lv_area_get_height(area),
+                   (unsigned char*)px_map, tileWidth * sizeof(lv_color_t));
+    lv_display_flush_ready(disp);
+}
+
+// Replace the old hal_init with one using the new lv_display_create interface
 static lv_display_t * hal_init(int32_t w, int32_t h)
 {
-
-  lv_group_set_default(lv_group_create());
-
-  lv_display_t * disp = lv_sdl_window_create(w, h);
-
-  lv_indev_t * mouse = lv_sdl_mouse_create();
-  lv_indev_set_group(mouse, lv_group_get_default());
-  lv_indev_set_display(mouse, disp);
-  lv_display_set_default(disp);
-
-  LV_IMAGE_DECLARE(mouse_cursor_icon); /*Declare the image file.*/
-  lv_obj_t * cursor_obj;
-  cursor_obj = lv_image_create(lv_screen_active()); /*Create an image object for the cursor */
-  lv_image_set_src(cursor_obj, &mouse_cursor_icon);           /*Set the image source*/
-  lv_indev_set_cursor(mouse, cursor_obj);             /*Connect the image  object to the driver*/
-
-  lv_indev_t * mousewheel = lv_sdl_mousewheel_create();
-  lv_indev_set_display(mousewheel, disp);
-  lv_indev_set_group(mousewheel, lv_group_get_default());
-
-  lv_indev_t * kb = lv_sdl_keyboard_create();
-  lv_indev_set_display(kb, disp);
-  lv_indev_set_group(kb, lv_group_get_default());
-
-  return disp;
+    if (spilcdInit(LCD_ILI9341, 0, 0, 24000000, 10, 11, 12) != 0) {
+        fprintf(stderr, "SPI LCD initialization failed\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // Setup LVGL display buffer
+    static lv_color_t buf[480 * 10]; // Buffer for 10 lines
+    
+    // Create the display using new interface:
+    //   lv_display_t * disp = lv_display_create(hor_res, ver_res);
+    //   lv_display_set_flush_cb(disp, flush_cb);
+    //   lv_display_set_buffers(disp, buf1, buf2, buf_size_in_bytes, mode);
+    lv_display_t * disp = lv_display_create(w, h);
+    lv_display_set_flush_cb(disp, flush_cb);
+    lv_display_set_buffers(disp, buf, NULL, sizeof(buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    
+    // ...existing code...
+    return disp;
 }
+
+//sudo apt-get install libsdl2-dev libpaho-mqtt-dev
