@@ -32,7 +32,9 @@
 			"lv_os.h": "c",
 			"lv_conf_internal.h": "c",
 			"lv_pthread.h": "c",
-			"lv_examples.h": "c"
+			"lv_examples.h": "c",
+			"mqttasync.h": "c",
+			"string.h": "c"
 		},
 		"github.copilot.enable": {
 			"*": false,
@@ -84,6 +86,7 @@
 	"launch": {
 		"version": "0.2.0",
 		"configurations": [
+		
 			{
 				"name": "Debug LVGL demo with gdb",
 				"type": "cppdbg",

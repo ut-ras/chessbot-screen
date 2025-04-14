@@ -19,8 +19,34 @@
 #include "lvgl/examples/lv_examples.h"
 #include "lvgl/demos/lv_demos.h"
 #include "glob.h"
-static lv_display_t * hal_init(int32_t w, int32_t h)
-;
+#include "MQTTAsync.h"
+#include <string.h>
+#include <sys/time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#define DEBUG 1
+
+#define ADDRESS     "tcp://localhost:1883"
+#define CLIENTID    "ChessBotScreenClient"
+#define QOS         0
+#define TIMEOUT     10000L
+
+char unique[50];
+volatile int connected = 0;
+volatile int subscribed = 0;
+// Add mutex for LVGL operations
+pthread_mutex_t lvgl_mutex;
+
+MQTTAsync client;
+int message_arrived(void *context, char *topicName, int topicLen, MQTTAsync_message *message);
+void on_connect(void* context, MQTTAsync_successData* response);
+void on_connect_failure(void* context, MQTTAsync_failureData* response);
+void on_subscribe(void* context, MQTTAsync_successData* response);
+void on_subscribe_failure(void* context, MQTTAsync_failureData* response);
+void on_connection_lost(void *context, char *cause);
+
+static lv_display_t * hal_init(int32_t w, int32_t h);
 // Custom delay function to replace lv_os_delay_ms
 void custom_delay_ms(uint32_t ms) {
     usleep(ms * 1000);
@@ -99,7 +125,8 @@ lv_obj_t * piece_circles [64];
 // lv_obj_t **reset_address;
 bool play = false;
 bool pieces[64];
-bool test_toggle = true;
+long button_last_pressed = 0;
+// bool test_toggle = true;
 
  void lv_grid_1(void)
  {
@@ -161,19 +188,7 @@ bool test_toggle = true;
                               LV_GRID_ALIGN_STRETCH, row, 1);
         lv_obj_set_style_radius(piece, 20, 0);
         lv_obj_set_style_opa(piece, LV_OPA_0, 0);
-        lv_obj_set_style_border_width(piece, 0, 1);
-        if (i < 16) {
-          lv_obj_set_style_bg_color(piece, lv_color_black(), 0);
-          lv_obj_set_style_border_color(piece, lv_color_white(), 0);
-        }
-        else if (i > 47) {
-          lv_obj_set_style_bg_color(piece, lv_color_white(), 0);
-          lv_obj_set_style_border_color(piece, lv_color_black(), 0);
-        }
-        else {
-          lv_obj_set_style_bg_color(piece, lv_color_hex(0xAAAAAA), 0);
-          lv_obj_set_style_border_color(piece, lv_color_hex(0x666666), 0);
-        }
+        lv_obj_set_style_border_width(piece, 1, 0);
         // lv_style_t style_circle;
         // lv_style_init(&style_circle);
 
@@ -189,36 +204,114 @@ bool test_toggle = true;
 
  }
 
- static void pause_cb(lv_event_t * e)
- {
-     lv_event_code_t code = lv_event_get_code(e);
-     lv_obj_t * btn = lv_event_get_target(e);
-    //  printf(e);
-    //  printf("\n");
-    //  printf(&pause_address);
-    //  if (e != &pause_address) {
-    //   printf("d");
-    //  }
-     if(code == LV_EVENT_CLICKED) {
-        if (play) {
-          play = false;
-          // pause game
-        }
-        else {
-          play = true;
-        }
-     }
- }
+ static void board_init() {
+  // Initialize the board state
+  for (int i = 0; i < 64; i++) {
+      if (i < 16) {
+          pieces[i] = true;
+          lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
+          lv_obj_set_style_bg_color(piece_circles[i], lv_color_black(), 0);
+          lv_obj_set_style_border_color(piece_circles[i], lv_color_white(), 0);
+      }
+      else if (i > 47) {
+          pieces[i] = true;
+          lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
+          lv_obj_set_style_bg_color(piece_circles[i], lv_color_white(), 0);
+          lv_obj_set_style_border_color(piece_circles[i], lv_color_black(), 0);
+      }
+      else {
+          pieces[i] = false;
+          lv_obj_set_style_opa(piece_circles[i], LV_OPA_0, 0);
+          lv_obj_set_style_bg_color(piece_circles[i], lv_color_hex(0xAAAAAA), 0);
+          lv_obj_set_style_border_color(piece_circles[i], lv_color_hex(0x666666), 0);
+      }
+  }
+}
 
- static lv_color_t reset_cb(lv_event_t * e)
+//  static void pause_cb(lv_event_t * e)
+//  {
+//      lv_event_code_t code = lv_event_get_code(e);
+//      lv_obj_t * btn = lv_event_get_target(e);
+//     //  printf(e);
+//     //  printf("\n");
+//     //  printf(&pause_address);
+//     //  if (e != &pause_address) {
+//     //   printf("d");
+//     //  }
+//      if(code == LV_EVENT_CLICKED && button_last_pressed + 2000 < lv_tick_get()) {
+//         pthread_mutex_lock(&lvgl_mutex);
+//         lv_tick_inc(5);
+//         MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+// 	      MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+// 	      int rc;
+//         char PAYLOAD[] = 'w';
+//         if (play) {
+//           play = false;
+//           PAYLOAD = 'pause';
+//         }
+//         else {
+//           play = true;
+//           PAYLOAD = 'play';
+//         }
+//         pubmsg.payload = PAYLOAD;
+// 	      pubmsg.payloadlen = (int)strlen(PAYLOAD);
+// 	      pubmsg.qos = QOS;
+// 	      pubmsg.retained = 0;
+//         if ((rc = MQTTAsync_sendMessage(client, '/playstatus', &pubmsg, &opts)) != MQTTASYNC_SUCCESS)
+// 	      {
+// 		        printf("Failed to start sendMessage, return code %d\n", rc);
+// 		        exit(EXIT_FAILURE);
+// 	      }
+//         pthread_mutex_unlock(&lvgl_mutex);
+//         custom_delay_ms(5);
+//         button_last_pressed = lv_tick_get();
+//      }
+//  }
+
+ static void home_cb(lv_event_t * e)
  {
     //  printf("hmm");
-     lv_event_code_t code = lv_event_get_code(e);
-     lv_obj_t * btn = lv_event_get_target(e);
-     if(code == LV_EVENT_CLICKED) {
-        // reset
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t * btn = lv_event_get_target(e);
+    if(code == LV_EVENT_PRESSED && lv_tick_get() - button_last_pressed > 1000) {
+      MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+      MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+      int rc;
+      char PAYLOAD[] = "home";
+      pubmsg.payload = PAYLOAD;
+      pubmsg.payloadlen = (int)strlen(PAYLOAD);
+      pubmsg.qos = QOS;
+      pubmsg.retained = 0;
+      if ((rc = MQTTAsync_sendMessage(client, "/robotmoves", &pubmsg, &opts)) != MQTTASYNC_SUCCESS)
+      {
+          printf("Failed to start sendMessage, return code %d\n", rc);
+          exit(EXIT_FAILURE);
+      }
+      button_last_pressed = lv_tick_get();
+    }
+ }
 
-     }
+ static void reset_cb(lv_event_t * e)
+ {
+    //  printf("hmm");
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t * btn = lv_event_get_target(e);
+    if(code == LV_EVENT_PRESSED && lv_tick_get() - button_last_pressed > 1000) {
+      MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+      MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+      int rc;
+      char PAYLOAD[] = "reset";
+      pubmsg.payload = PAYLOAD;
+      pubmsg.payloadlen = (int)strlen(PAYLOAD);
+      pubmsg.qos = QOS;
+      pubmsg.retained = 0;
+      if ((rc = MQTTAsync_sendMessage(client, "/resetboard", &pubmsg, &opts)) != MQTTASYNC_SUCCESS)
+      {
+          printf("Failed to start sendMessage, return code %d\n", rc);
+          exit(EXIT_FAILURE);
+      }
+      button_last_pressed = lv_tick_get();
+    }
  }
 
  void lv_buttons() {
@@ -227,7 +320,7 @@ bool test_toggle = true;
     lv_obj_set_pos(pause_btn, 320, 0);                            /*Set its position*/
     lv_obj_set_size(pause_btn, 155, 80);                          /*Set its size*/
     lv_obj_set_style_radius(pause_btn, 0, 0);
-    lv_obj_add_event_cb(pause_btn, pause_cb, LV_EVENT_ALL, NULL);           /*Assign a callback to the button*/
+    // lv_obj_add_event_cb(pause_btn, pause_cb, LV_EVENT_ALL, NULL);           /*Assign a callback to the button*/
     lv_obj_t * label = lv_label_create(pause_btn);          /*Add a label to the button*/
     if (play) {
       // printf("Play");
@@ -244,14 +337,21 @@ bool test_toggle = true;
     lv_obj_set_size(reset_btn, 155, 80);                          /*Set its size*/
     lv_obj_set_style_radius(reset_btn, 0, 0);
     lv_obj_add_event_cb(reset_btn, reset_cb, LV_EVENT_ALL, NULL);           /*Assign a callback to the button*/
-    lv_obj_set_style_bg_color(reset_btn, lv_color_hex(0x8E1600), 0);
+    lv_obj_set_style_bg_color(reset_btn, lv_color_hex(0x8B0000), 0);
     label = lv_label_create(reset_btn);          /*Add a label to the button*/
     lv_label_set_text(label, "Reset");                    /*Set the labels text*/
     lv_obj_center(label);
- }
 
- // Add mutex for LVGL operations
-pthread_mutex_t lvgl_mutex;
+    lv_obj_t * home_btn = lv_btn_create(lv_scr_act());     /*Add a button the current screen*/
+    lv_obj_set_pos(home_btn, 320, 160);                            /*Set its position*/
+    lv_obj_set_size(home_btn, 155, 80);                          /*Set its size*/
+    lv_obj_set_style_radius(home_btn, 0, 0);
+    lv_obj_add_event_cb(home_btn, home_cb, LV_EVENT_ALL, NULL);           /*Assign a callback to the button*/
+    lv_obj_set_style_bg_color(home_btn, lv_color_hex(0x999999), 0);
+    label = lv_label_create(home_btn);          /*Add a label to the button*/
+    lv_label_set_text(label, "Home");                    /*Set the labels text*/
+    lv_obj_center(label);
+ }
 
 // Modified thread function for lv_timer_handler loop
 void* lvgl_loop_thread(void *param) {
@@ -267,61 +367,84 @@ void* lvgl_loop_thread(void *param) {
 }
 
 // Modified test function with mutex protection
-static void test() {
+// static void test() {
+//   while (1) {
+//     uint8_t i;
+//     test_toggle = !test_toggle;
+
+//     for (i = 0; i < 64; i++) {
+//           // Lock mutex before modifying UI
+//     pthread_mutex_lock(&lvgl_mutex);
+
+//       printf("i: %d\n", i);
+//       if (!test_toggle) {
+//         pieces[i] = true;
+//         printf("iiii: %d\n", i);
+
+//         // Check if piece_circles[i] is valid before setting opacity
+//         if (piece_circles[i] != NULL && (i < 16 || i > 47)) {
+//           lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
+//         } else {
+//           printf("piece ciecle is null booooo\n");
+//           i += 31;
+//         }
+//         printf("i: %d\n", i);
+
+//         // if (i > 2) {
+//         //   pieces[i - 3] = false;
+//         //   printf("b: %d\n", i);
+
+//         //   lv_obj_set_style_opa(piece_circles[i - 3], LV_OPA_0, 0);
+//         //   printf("c: %d\n", i);
+
+//         // }
+//       }
+//       else {
+//         pieces[i] = false;
+//         printf("iiii: %d\n", i);
+
+//         // Check if piece_circles[i] is valid before setting opacity
+//         if (piece_circles[i] != NULL && (i < 16 || i > 47)) {
+//           lv_obj_set_style_opa(piece_circles[i], LV_OPA_0, 0);
+//         } else {
+//           printf("piece ciecle is null booooo\n");
+//           i += 31;
+//         }
+//         printf("i: %d\n", i);
+//       printf("d: %d\n", i);
+//       }
+//     lv_tick_inc(100); // Example if you're simulating some delay
+//     printf("e: %d\n", i);
+
+//     // Unlock mutex after modifying UI
+//     pthread_mutex_unlock(&lvgl_mutex);
+
+//     custom_delay_ms(100); // portable LVGL delay
+//     }
+
+//   }
+// }
+
+static void run_test() {
   while (1) {
-    uint8_t i;
-    test_toggle = !test_toggle;
+        uint8_t i;
 
-    for (i = 0; i < 64; i++) {
-          // Lock mutex before modifying UI
-    pthread_mutex_lock(&lvgl_mutex);
+        for (i = 0; i < 64; i++) {
+              // Lock mutex before modifying UI
+        pthread_mutex_lock(&lvgl_mutex);
 
-      printf("i: %d\n", i);
-      if (!test_toggle) {
-        pieces[i] = true;
-        printf("iiii: %d\n", i);
-
-        // Check if piece_circles[i] is valid before setting opacity
-        if (piece_circles[i] != NULL && (i < 16 || i > 47)) {
+        // printf("i: %d\n", i);
+        if (pieces[i]) {
           lv_obj_set_style_opa(piece_circles[i], LV_OPA_100, 0);
-        } else {
-          printf("piece ciecle is null booooo\n");
-          i += 31;
         }
-        printf("i: %d\n", i);
-
-        // if (i > 2) {
-        //   pieces[i - 3] = false;
-        //   printf("b: %d\n", i);
-
-        //   lv_obj_set_style_opa(piece_circles[i - 3], LV_OPA_0, 0);
-        //   printf("c: %d\n", i);
-
-        // }
-      }
-      else {
-        pieces[i] = false;
-        printf("iiii: %d\n", i);
-
-        // Check if piece_circles[i] is valid before setting opacity
-        if (piece_circles[i] != NULL && (i < 16 || i > 47)) {
+        else {
           lv_obj_set_style_opa(piece_circles[i], LV_OPA_0, 0);
-        } else {
-          printf("piece ciecle is null booooo\n");
-          i += 31;
         }
-        printf("i: %d\n", i);
-      printf("d: %d\n", i);
-      }
-    lv_tick_inc(100); // Example if you're simulating some delay
-    printf("e: %d\n", i);
+        // Unlock mutex after modifying UI
+        pthread_mutex_unlock(&lvgl_mutex);
 
-    // Unlock mutex after modifying UI
-    pthread_mutex_unlock(&lvgl_mutex);
-
-    custom_delay_ms(100); // portable LVGL delay
-    }
-
+        }
+        custom_delay_ms(20); // portable LVGL delay
   }
 }
 
@@ -329,9 +452,172 @@ static void test() {
 void* test_thread(void *param) {
   (void)param;
 
-  test();
+  run_test();
 
   return NULL;
+}
+
+// MQTT connection success callback
+void on_connect(void* context, MQTTAsync_successData* response) {
+  MQTTAsync client = (MQTTAsync)context;
+  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+  int rc;
+
+  printf("Successfully connected\n");
+  connected = 1;
+
+  // Set up subscription callback
+  opts.onSuccess = on_subscribe;
+  opts.onFailure = on_subscribe_failure;
+  opts.context = client;
+
+  // Subscribe to topics
+  if ((rc = MQTTAsync_subscribe(client, "$SYS/#", QOS, &opts)) != MQTTASYNC_SUCCESS) {
+      fprintf(stderr, "Failed to start subscribe: %d\n", rc);
+      return;
+  }
+
+  if ((rc = MQTTAsync_subscribe(client, "/boardstate", QOS, &opts)) != MQTTASYNC_SUCCESS) {
+      fprintf(stderr, "Failed to start subscribe: %d\n", rc);
+      return;
+  }
+
+  if ((rc = MQTTAsync_subscribe(client, "/robotmoves", QOS, &opts)) != MQTTASYNC_SUCCESS) {
+      fprintf(stderr, "Failed to start subscribe: %d\n", rc);
+      return;
+  }
+}
+
+// MQTT connection failure callback
+void on_connect_failure(void* context, MQTTAsync_failureData* response) {
+  fprintf(stderr, "Connect failed, rc: %d\n", response ? response->code : -1);
+  connected = 0;
+}
+
+// MQTT subscription success callback
+void on_subscribe(void* context, MQTTAsync_successData* response) {
+  printf("Subscribe succeeded\n");
+  subscribed = 1;
+}
+
+// MQTT subscription failure callback
+void on_subscribe_failure(void* context, MQTTAsync_failureData* response) {
+  fprintf(stderr, "Subscribe failed, rc: %d\n", response ? response->code : -1);
+}
+
+// MQTT connection lost callback
+void on_connection_lost(void *context, char *cause) {
+  printf("Connection lost: %s\n", cause ? cause : "unknown cause");
+  connected = 0;
+  subscribed = 0;
+  // In a production application, you might want to attempt reconnection here
+}
+
+// MQTT message arrived callback
+int message_arrived(void *context, char *topicName, int topicLen, MQTTAsync_message *message) {
+  if (!message->payload) {
+      MQTTAsync_freeMessage(&message);
+      MQTTAsync_free(topicName);
+      return 1;
+  }
+
+  if (strcmp(topicName, "/boardstate") == 0 ||
+      strcmp(topicName, "/robotmoves") == 0) {
+
+      pthread_mutex_lock(&lvgl_mutex);
+
+      // if (DEBUG) {
+      //     time_t now = time(NULL);
+      //     printf("%ld\n", now);
+
+      //     // Print message payload in hex
+      //     printf("Payload: ");
+      //     for (int i = 0; i < message->payloadlen; i++) {
+      //         printf("%02x ", ((uint8_t*)message->payload)[i]);
+      //     }
+      //     printf("\n");
+      // }
+
+      // test command: mosquitto_pub -t /boardstate -m "11111111"
+
+      if (strcmp(topicName, "/boardstate") == 0) {
+          printf("boardstate\n");
+          if (message->payloadlen != 8) {
+              printf("wrong size boardstate\n");
+              pthread_mutex_unlock(&lvgl_mutex);
+              MQTTAsync_freeMessage(&message);
+              MQTTAsync_free(topicName);
+              return 1;
+          }
+
+          // Store the payload in the middle section of our data array
+          char* mes_str = (char*)message->payload;
+          printf("%s\n", mes_str);
+          long mes_long = atol(mes_str);
+          printf("%ld\n", mes_long);
+          for (int i = 63; i >= 0; i--) {
+            pieces[i] = (mes_long >> i) & 1;
+          }
+          printf("got it\n");
+      }
+
+      // test command: mosquitto_pub -t /robotmoves -m "e2e4"
+      //               mosquitto_pub -t /robotmoves -m "e7e5"
+      //               mosquitto_pub -t /robotmoves -m "g1f3"
+      //               mosquitto_pub -t /robotmoves -m "b8c6"
+
+
+      else if (strcmp(topicName, "/robotmoves") == 0) {
+          printf("robotmoves\n");
+          if (message->payloadlen != 4) {
+              printf("wrong size robotmove payload\n");
+              pthread_mutex_unlock(&lvgl_mutex);
+              MQTTAsync_freeMessage(&message);
+              MQTTAsync_free(topicName);
+              return 1;
+          }
+
+          char* mes_str = (char*)message->payload;
+          printf("YEA");
+          printf("%s\n", mes_str);
+          printf("%d\n", strcmp(mes_str, "home"));
+          if (strcmp(mes_str, "home")) {
+            char* original_pos = (char*)malloc(3 * sizeof(char));
+            char* new_pos = (char*)malloc(3 * sizeof(char));
+            memcpy(original_pos, mes_str, 2 * sizeof(char));
+            memcpy(new_pos, mes_str + 2, 2 * sizeof(char));
+            original_pos[2] = '\0';
+            new_pos[2] = '\0';
+            printf("wee\n");
+            printf("%d\n", original_pos[1]);
+            printf("weeee\n");
+            printf("%d\n", new_pos[1]);
+            printf("weeeeeee\n");
+            int original_pos_int = (abs((int)original_pos[1] - 56)) * 8 + ((int)original_pos[0] - 97);
+            int new_pos_int = (abs((int)new_pos[1] - 56)) * 8 + ((int)new_pos[0] - 97);
+            printf("%d\n", original_pos_int);
+            printf("%d\n", new_pos_int);
+            lv_color_t bg_color = lv_obj_get_style_bg_color(piece_circles[original_pos_int], 0);
+            printf("a\n");
+            lv_color_t border_color = lv_obj_get_style_border_color(piece_circles[original_pos_int], 0);
+            printf("aa\n");
+            lv_obj_set_style_bg_color(piece_circles[new_pos_int], bg_color, 0);
+            printf("aaa\n");
+            lv_obj_set_style_border_color(piece_circles[new_pos_int], border_color, 0);
+            printf("aaaa\n");
+            pieces[original_pos_int] = false;
+            pieces[new_pos_int] = true;
+            printf("aaaaa\n");
+          }
+
+      }
+
+      pthread_mutex_unlock(&lvgl_mutex);
+  }
+
+  MQTTAsync_freeMessage(&message);
+  MQTTAsync_free(topicName);
+  return 1;
 }
 
 int main(int argc, char **argv)
@@ -339,19 +625,60 @@ int main(int argc, char **argv)
   (void)argc; /*Unused*/
   (void)argv; /*Unused*/
 
+  MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
+  int rc;
+
   /*Initialize LVGL*/
   lv_init();
 
   // Initialize mutex for LVGL operations
-  pthread_mutex_init(&lvgl_mutex, NULL);
+  if (pthread_mutex_init(&lvgl_mutex, NULL) != 0) {
+    fprintf(stderr, "Mutex initialization failed\n");
+    return 1;
+  }
+
+  // MQTT client
+  if ((rc = MQTTAsync_create(&client, ADDRESS, CLIENTID,
+    MQTTCLIENT_PERSISTENCE_NONE, NULL)) != MQTTASYNC_SUCCESS) {
+    fprintf(stderr, "Failed to create MQTT client: %d\n", rc);
+    return 1;
+  }
+
+  // Set callbacks
+  if ((rc = MQTTAsync_setCallbacks(client, client, on_connection_lost,
+    message_arrived, NULL)) != MQTTASYNC_SUCCESS) {
+    fprintf(stderr, "Failed to set callbacks: %d\n", rc);
+    return 1;
+  }
+
+  // Connect to MQTT broker
+  conn_opts.keepAliveInterval = 20;
+  conn_opts.cleansession = 1;
+  conn_opts.onSuccess = on_connect;
+  conn_opts.onFailure = on_connect_failure;
+  conn_opts.context = client;
+
+  printf("connecting\n");
+  if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS) {
+      fprintf(stderr, "Failed to start connect: %d\n", rc);
+      return 1;
+  }
+
+  // Wait for connection and subscription to complete
+  while (!connected || !subscribed) {
+    usleep(100000); // Sleep for 100ms
+  }
+
+  printf("Successfully connected and subscribed\n");
 
   /*Initialize the HAL (display, input devices, tick) for LVGL*/
   hal_init(480,320);
- // lv_demo_widgets();
- pthread_mutex_lock(&lvgl_mutex);
- lv_grid_1();
- pthread_mutex_unlock(&lvgl_mutex);
-  // Create test thread
+  // lv_demo_widgets();
+  pthread_mutex_lock(&lvgl_mutex);
+  lv_grid_1();
+  board_init();
+  pthread_mutex_unlock(&lvgl_mutex);
+  // Create setup thread
   pthread_t test_thread_handle;
   custom_thread_create(&test_thread_handle, test_thread, 4096, 1, NULL);
 
@@ -370,6 +697,8 @@ int main(int argc, char **argv)
   }
 
   // This will never be reached
+  MQTTAsync_disconnect(client, NULL);
+  MQTTAsync_destroy(&client);
   pthread_mutex_destroy(&lvgl_mutex);
 
   return 0;

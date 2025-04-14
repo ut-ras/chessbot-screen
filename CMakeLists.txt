@@ -88,10 +88,14 @@ else()
         ${PROJECT_SOURCE_DIR}/main/src/mouse_cursor_icon.c
     )
 endif()
+find_package(eclipse-paho-mqtt-c REQUIRED)
+
 
 # Define LVGL configuration as a simple include
 target_compile_definitions(main PRIVATE LV_CONF_INCLUDE_SIMPLE)
 target_link_libraries(main lvgl lvgl::examples lvgl::demos lvgl::thorvg ${SDL2_LIBRARIES} m pthread)
+target_link_libraries(main eclipse-paho-mqtt-c::paho-mqtt3a)
+
 
 # Only link freertos_config if the FreeRTOS directory exists
 if(USE_FREERTOS)
