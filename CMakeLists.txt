@@ -63,10 +63,29 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=native")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
 
 # Add compile definitions based on the selected options
+add_definitions(
+  -DLV_CONF_INCLUDE_SIMPLE=1
+  -DLV_USE_FS_STDIO=1
+  -DLV_USE_BIN_DECODER=1
+  -DLV_USE_BARCODE=0
+  -DLV_USE_THORVG=0
+  -DLV_USE_LOTTIE=0
+  -DLV_USE_FREETYPE=0
+  -DLV_USE_BMP=0
+  -DLV_USE_GIF=0
+  -DLV_USE_LIBPNG=0
+  -DLV_USE_LIBJPEG_TURBO=0
+  -DLV_USE_LZ4=0
+  -DLV_USE_EXPAT=0
+)
+
 add_compile_definitions($<$<BOOL:${LV_USE_DRAW_SDL}>:LV_USE_DRAW_SDL=0>)
-add_compile_definitions($<$<BOOL:${LV_USE_LIBPNG}>:LV_USE_LIBPNG=1>)
-add_compile_definitions($<$<BOOL:${LV_USE_LIBJPEG_TURBO}>:LV_USE_LIBJPEG_TURBO=1>)
-add_compile_definitions($<$<BOOL:${LV_USE_FFMPEG}>:LV_USE_FFMPEG=1>)
+add_compile_definitions($<$<BOOL:${LV_USE_LIBPNG}>:LV_USE_LIBPNG=0>)
+add_compile_definitions($<$<BOOL:${LV_USE_LIBJPEG_TURBO}>:LV_USE_LIBJPEG_TURBO=0>)
+add_compile_definitions($<$<BOOL:${LV_USE_FFMPEG}>:LV_USE_FFMPEG=0>)
+set(LV_CONF_BUILD_DISABLE_EXAMPLES ON CACHE BOOL "Disable LVGL examples")
+set(LV_CONF_BUILD_DISABLE_DEMOS ON CACHE BOOL "Disable LVGL demos")
+set(LV_CONF_BUILD_DISABLE_THORVG_INTERNAL ON CACHE BOOL "Disable ThorVG support")
 
 # Add LVGL subdirectory
 add_subdirectory(lvgl)
@@ -87,15 +106,17 @@ else()
     add_executable(main
         ${PROJECT_SOURCE_DIR}/main/src/main.c
         ${PROJECT_SOURCE_DIR}/SPI_LCD/spi_lcd.c
+	${PROJECT_SOURCE_DIR}/SPI_LCD/fonts.c  # <-- Add this!
         ${PROJECT_SOURCE_DIR}/main/src/mouse_cursor_icon.c
     )
 endif()
 find_package(eclipse-paho-mqtt-c REQUIRED)
 
 
+find_library(PIGPIO_LIB NAMES pigpio REQUIRED)
 # Define LVGL configuration as a simple include
 target_compile_definitions(main PRIVATE LV_CONF_INCLUDE_SIMPLE)
-target_link_libraries(main lvgl lvgl::examples lvgl::demos lvgl::thorvg ${SDL2_LIBRARIES} m pthread)
+target_link_libraries(main lvgl ${PIGPIO_LIB} m pthread)
 target_link_libraries(main eclipse-paho-mqtt-c::paho-mqtt3a)
 
 

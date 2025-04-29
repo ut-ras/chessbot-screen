@@ -712,6 +712,7 @@ static void flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_m
     int tileWidth = lv_area_get_width(area);
     // Send the draw buffer to the SPI display.
     // Assumes lv_color_t is 16-bit and pitch equals tileWidth * sizeof(lv_color_t)
+    printf("FLUSH\n");
     spilcdDrawTile(area->x1, area->y1, tileWidth, lv_area_get_height(area),
                    (unsigned char*)px_map, tileWidth * sizeof(lv_color_t));
     lv_display_flush_ready(disp);
@@ -720,21 +721,31 @@ static void flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * px_m
 // Replace the old hal_init with one using the new lv_display_create interface
 static lv_display_t * hal_init(int32_t w, int32_t h)
 {
-    if (spilcdInit(LCD_ILI9341, 0, 0, 24000000, 10, 11, 12) != 0) {
-        fprintf(stderr, "SPI LCD initialization failed\n");
-        exit(EXIT_FAILURE);
-    }
+    printf("HAL_INIT\n");
+// if (spilcdInit(LCD_ILI9341, 0, 0, 24000000, 10, 22, 12) != 0) {
+        //fprintf(stderr, "SPI LCD initialization failed\n");
+        //exit(EXIT_FAILURE);
+    //}
     
     // Setup LVGL display buffer
     static lv_color_t buf[480 * 10]; // Buffer for 10 lines
     
+    printf("SETUP\n");
     // Create the display using new interface:
-    //   lv_display_t * disp = lv_display_create(hor_res, ver_res);
-    //   lv_display_set_flush_cb(disp, flush_cb);
-    //   lv_display_set_buffers(disp, buf1, buf2, buf_size_in_bytes, mode);
-    lv_display_t * disp = lv_display_create(w, h);
-    lv_display_set_flush_cb(disp, flush_cb);
-    lv_display_set_buffers(disp, buf, NULL, sizeof(buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
+     //  lv_display_t * disp = lv_display_create(hor_res, ver_res);
+     //  lv_display_set_flush_cb(disp, flush_cb);
+     // lv_display_set_buffers(disp, buf1, buf2, buf_size_in_bytes, mode);
+    printf("SETUP2\n");
+//    lv_display_t * disp = lv_display_create(w, h);
+//    lv_display_set_flush_cb(disp, flush_cb);
+//lv_display_set_buffers(disp, buf, NULL, sizeof(buf), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    printf("SETUP3\n");
+    lv_display_t *disp = lv_linux_fbdev_create();
+    printf("SETUP4\n");
+    lv_linux_fbdev_set_file(disp, "/dev/fb1");
+
+    printf("SETUP5\n");
+    lv_linux_fbdev_set_force_refresh(disp, true);
     
     // ...existing code...
     return disp;
